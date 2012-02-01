@@ -1,5 +1,19 @@
 <?php
+/**
+ * PHP redis session handler
+ *
+ * @package	RSession
+ * @author	Jose' Pedro Saraiva <nocive at gmail.com>
+ * @version	0.2
+ *
+ * Non blocking with explicit locking redis session handler for PHP >= 5.3
+ * Requires: Predis library
+ */
 
+/**
+ * RSessionBase
+ * Base abstract class
+ */
 abstract class RSessionBase
 {
 	protected static $_classmap = array( 
@@ -9,6 +23,11 @@ abstract class RSessionBase
 	);
 }
 
+
+/**
+ * RSessionConfig
+ * Allows getting and setting of config variables used across all classes
+ */
 class RSessionConfig extends RSessionBase
 {
 	public static $defaults = array( 
@@ -30,7 +49,7 @@ class RSessionConfig extends RSessionBase
 
 	public function __construct( $settings = array() )
 	{
-		$this->settings = ! empty( $settings ) ? array_merge( static::$defaults, $settings ) : static::$defaults;
+		$this->settings = ! empty( $settings ) ? array_merge( self::$defaults, $settings ) : self::$defaults;
 	}
 
 
@@ -50,6 +69,11 @@ class RSessionConfig extends RSessionBase
 	}
 }
 
+
+/**
+ * RSessionRedis
+ * Works as a method proxy for Predis_Client library. Implements locking primitives
+ */
 class RSessionRedis extends RSessionBase
 {
 	public $client;
@@ -88,14 +112,14 @@ class RSessionRedis extends RSessionBase
 	}
 
 
-	public function acquire( $key, $timeout = static::LOCK_DEFAULT_TIMEOUT, $maxAttempts = static::LOCK_DEFAULT_MAX_ATTEMPTS )
+	public function acquire( $key, $timeout = self::LOCK_DEFAULT_TIMEOUT, $maxAttempts = self::LOCK_DEFAULT_MAX_ATTEMPTS )
 	{
 		$expire = (time() + $timeout + 1) . '-' . getmypid();
 		$attempts = 0;
 		
 		do {
 			if ($this->setnx( $key, $expire )) {
-				static::$_locks[$key] = 1;
+				self::$_locks[$key] = 1;
 				return true;
 			}
 			
@@ -103,11 +127,11 @@ class RSessionRedis extends RSessionBase
 			list ( $testExpire, ) = explode( '-', $lockValue );
 			if ($testExpire < time()) {
 				if ($this->getset( $key, $expire ) === $lockValue) {
-					static::$_locks[$key] = 1;
+					self::$_locks[$key] = 1;
 					return true;
 				}
 			}
-			usleep( static::LOCK_RETRY_SLEEP * 1000000 );
+			usleep( self::LOCK_RETRY_SLEEP * 1000000 );
 		} while ( ++ $attempts < $maxAttempts );
 		
 		return false;
@@ -117,32 +141,23 @@ class RSessionRedis extends RSessionBase
 	public function release( $key )
 	{
 		if (($lockValue = $this->get( $key )) === null) {
-			unset( static::$_locks[$key] );
+			unset( self::$_locks[$key] );
 			return true;
 		}
 		
 		list ( $lockTimeout, $lockHolder ) = explode( '-', $lockValue );
 		if ((int) $lockTimeout > time() && (int) $lockHolder === getmypid()) {
 			$this->del( $key );
-			unset( static::$_locks[$key] );
+			unset( self::$_locks[$key] );
 			return true;
 		}
 		return false;
 	}
 
 
-	protected function _releaseAll()
-	{
-		// release all unreleased locks
-		foreach ( array_keys( static::$_locks ) as $lkey ) {
-			$this->release( $lkey );
-		}
-	}
-
-
 	public function locked( $key, $deep = true )
 	{
-		return ! $deep ? array_key_exists( $key, static::$_locks ) : array_key_exists( $key, static::$_locks ) || $this->exists( $key );
+		return ! $deep ? array_key_exists( $key, self::$_locks ) : array_key_exists( $key, self::$_locks ) || $this->exists( $key );
 	}
 
 
@@ -154,8 +169,22 @@ class RSessionRedis extends RSessionBase
 			$method 
 		), $args );
 	}
+
+
+	protected function _releaseAll()
+	{
+		// release all unreleased locks
+		foreach ( array_keys( self::$_locks ) as $lkey ) {
+			$this->release( $lkey );
+		}
+	}
 }
 
+
+/**
+ * RSessionMain
+ * Main class, implements the session handling itself
+ */
 class RSessionMain extends RSessionBase
 {
 	public $config;
@@ -171,7 +200,6 @@ class RSessionMain extends RSessionBase
 	
 	protected $_data = array();
 	
-	const ARRAY_PATH_DELIMITER = '.';
 	const HASH_TOUCH_KEY = '__#tx';
 	
 	const SESSION_ARRAY_COMPAT_OBJECT = 'object';
@@ -180,12 +208,12 @@ class RSessionMain extends RSessionBase
 
 	public function __construct( $settings = array() )
 	{
-		if ($settings instanceof static::$_classmap['config']) {
+		if ($settings instanceof self::$_classmap['config']) {
 			$this->config = $settings;
 		} else {
-			$this->config = new static::$_classmap['config']( $settings );
+			$this->config = new self::$_classmap['config']( $settings );
 		}
-		$this->redis = new static::$_classmap['redis']( $this->config );
+		$this->redis = new self::$_classmap['redis']( $this->config );
 		
 		if ($this->config->get( 'session_start' )) {
 			$this->start();
@@ -210,7 +238,7 @@ class RSessionMain extends RSessionBase
 		}
 		
 		if (headers_sent()) {
-			if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_POPULATE) {
+			if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_POPULATE) {
 				$_SESSION = array();
 			}
 			return false;
@@ -223,7 +251,7 @@ class RSessionMain extends RSessionBase
 		}
 		
 		if ($this->started()) {
-			if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_OBJECT) {
+			if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_OBJECT) {
 				$_SESSION = $this;
 			}
 			
@@ -233,7 +261,7 @@ class RSessionMain extends RSessionBase
 				$this->name = session_name();
 				$this->_init();
 				
-				if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_POPULATE) {
+				if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_POPULATE) {
 					$_SESSION = & $this->_data;
 				}
 			}
@@ -258,7 +286,7 @@ class RSessionMain extends RSessionBase
 			throw new Exception( 'Empty session name or session id' );
 		}
 		
-		if (! array_key_exists( $type, static::$keyTemplates )) {
+		if (! array_key_exists( $type, self::$keyTemplates )) {
 			throw new InvalidArgumentException( "Key template '$type' doesn't exist" );
 		}
 		
@@ -266,15 +294,15 @@ class RSessionMain extends RSessionBase
 		
 		switch ($type) {
 		case 'lock':
-			return sprintf( static::$keyTemplates[$type], md5( implode( '-', array( 
+			return sprintf( self::$keyTemplates[$type], md5( implode( '-', array( 
 				$name, 
 				$this->id, 
-				$this->_arrayPathBasename( $args[0] ) 
+				ArrayPath::basename( $args[0] ) 
 			) ) ) );
 		case 'session':
-			return sprintf( static::$keyTemplates[$type], $name, $this->id );
+			return sprintf( self::$keyTemplates[$type], $name, $this->id );
 		default:
-			return vsprintf( static::$keyTemplates[$type], $args );
+			return vsprintf( self::$keyTemplates[$type], $args );
 		}
 	}
 
@@ -334,17 +362,17 @@ class RSessionMain extends RSessionBase
 		
 		$this->start();
 		
-		$field = $this->_arrayPathBasename( $key );
+		$field = ArrayPath::basename( $key );
 		$lkey = $this->rkey( 'lock', $field );
 		
 		// if no lock honouring or locked locally, just write
 		if (! $honourLocks || $this->redis->locked( $lkey, $deep = false )) {
-			$this->_data = $this->_arrayPathInsert( $this->_data, $key, $value );
+			$this->_data = ArrayPath::insert( $this->_data, $key, $value );
 			$this->_write( $field, $this->_data[$field] );
 			return true;
 		} else {
 			if ($this->redis->acquire( $lkey )) {
-				$this->_data = $this->_arrayPathInsert( $this->_data, $key, $value );
+				$this->_data = ArrayPath::insert( $this->_data, $key, $value );
 				$this->_write( $field, $this->_data[$field] );
 				
 				return $this->redis->release( $lkey );
@@ -360,7 +388,7 @@ class RSessionMain extends RSessionBase
 		$this->start();
 		
 		if ($cached) {
-			return $this->_arrayPathExtract( $this->_data, $key );
+			return ArrayPath::extract( $this->_data, $key );
 		} else {
 			if ($key === null) {
 				$data = $this->_read();
@@ -369,7 +397,7 @@ class RSessionMain extends RSessionBase
 				}
 				return $data;
 			} else {
-				$field = $this->_arrayPathBasename( $key );
+				$field = ArrayPath::basename( $key );
 				$data = $this->_read( $field );
 				
 				if ($data !== null) {
@@ -381,7 +409,7 @@ class RSessionMain extends RSessionBase
 					$data = array( 
 						$field => $data 
 					);
-					$data = $this->_arrayPathExtract( $data, $key );
+					$data = ArrayPath::extract( $data, $key );
 				}
 				
 				return $data;
@@ -408,16 +436,16 @@ class RSessionMain extends RSessionBase
 		
 		$this->start();
 		
-		$field = $this->_arrayPathBasename( $key );
+		$field = ArrayPath::basename( $key );
 		$lkey = $this->rkey( 'lock', $field );
 		
 		if (! $honourLocks || $this->redis->locked( $lkey, $deep = false )) {
-			$this->_data = $this->_arrayPathDelete( $this->_data, $key );
+			$this->_data = ArrayPath::delete( $this->_data, $key );
 			$this->_write( $field, $this->_data[$field] );
 			return true;
 		} else {
 			if ($this->redis->acquire( $lkey )) {
-				$this->_data = $this->_arrayPathDelete( $this->_data, $key );
+				$this->_data = ArrayPath::delete( $this->_data, $key );
 				if (! array_key_exists( $field, $this->_data )) {
 					$this->_delete( $field );
 				} else {
@@ -458,6 +486,9 @@ class RSessionMain extends RSessionBase
 	}
 
 
+	/*
+	 * Protected methods
+	 */
 	protected function _regenerateId( $clear = false )
 	{
 		if (! $this->started()) {
@@ -481,7 +512,7 @@ class RSessionMain extends RSessionBase
 			$this->_init();
 		} else {
 			$skey = $this->rkey( 'session' );
-			if ($this->redis->hsetnx( $skey, static::HASH_TOUCH_KEY, 1 )) {
+			if ($this->redis->hsetnx( $skey, self::HASH_TOUCH_KEY, 1 )) {
 				$pipe = $this->redis->pipeline();
 				$pipe->expire( $skey, ini_get( 'session.gc_maxlifetime' ) );
 				foreach ( $this->_data as $k => $v ) {
@@ -498,13 +529,13 @@ class RSessionMain extends RSessionBase
 	{
 		$skey = $this->rkey( 'session' );
 		
-		if ($this->redis->hsetnx( $skey, static::HASH_TOUCH_KEY, 1 )) {
+		if ($this->redis->hsetnx( $skey, self::HASH_TOUCH_KEY, 1 )) {
 			// new session
 			$this->redis->expire( $skey, ini_get( 'session.gc_maxlifetime' ) );
 			$this->_data = array();
 		} else {
 			$data = $this->redis->hgetall( $skey );
-			unset( $data[static::HASH_TOUCH_KEY] );
+			unset( $data[self::HASH_TOUCH_KEY] );
 			$this->_data = array_map( array( 
 				& $this, 
 				'_unpack' 
@@ -519,7 +550,7 @@ class RSessionMain extends RSessionBase
 		
 		if ($field === null) {
 			$data = $this->redis->hgetall( $skey );
-			unset( $data[static::HASH_TOUCH_KEY] );
+			unset( $data[self::HASH_TOUCH_KEY] );
 			return array_map( array( 
 				& $this, 
 				'_unpack' 
@@ -563,6 +594,9 @@ class RSessionMain extends RSessionBase
 	}
 
 
+	/*
+	 * Convenience install() method
+	 */
 	public function install()
 	{
 		register_shutdown_function( 'session_write_close' );
@@ -587,15 +621,15 @@ class RSessionMain extends RSessionBase
 			'sess_gc' 
 		) );
 		
-		if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_OBJECT) {
+		if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_OBJECT) {
 			$_SESSION = $this;
 		}
 	}
 
 
-	/*******************************
+	/*
 	 * Session handler callbacks
-	 *******************************/
+	 */
 	public function sess_open( $save_path, $session_name )
 	{
 		return true;
@@ -630,123 +664,13 @@ class RSessionMain extends RSessionBase
 	{
 		return true;
 	}
-
-
-	/*******************************
-	 * Array path functions
-	 *******************************/
-	protected function _arrayPathBasename( $path )
-	{
-		if (empty( $path )) {
-			throw new InvalidArgumentException( "Invalid path specified '$path'" );
-		}
-		$parts = explode( static::ARRAY_PATH_DELIMITER, $path );
-		return $parts[0];
-	}
-
-
-	protected function _arrayPathExtract( array $list, $path, $default = null )
-	{
-		if (! is_array( $list )) {
-			return $default;
-		}
-		
-		$path = trim( $path, static::ARRAY_PATH_DELIMITER );
-		$value = & $list;
-		
-		if (! empty( $path )) {
-			$parts = explode( static::ARRAY_PATH_DELIMITER, $path );
-			
-			foreach ( $parts as $part ) {
-				if (isset( $value[$part] )) {
-					$value = $value[$part];
-				} else {
-					return $default;
-				}
-			}
-		}
-		
-		return $value;
-	}
-
-
-	protected function _arrayPathInsert( array $list, $path, $value = null )
-	{
-		if (! is_array( $path )) {
-			$path = explode( '.', $path );
-		}
-		$_list = & $list;
-		
-		foreach ( $path as $i => $key ) {
-			if (is_numeric( $key ) && intval( $key ) > 0 || $key === '0') {
-				$key = intval( $key );
-			}
-			if ($i === count( $path ) - 1) {
-				$_list[$key] = $value;
-			} else {
-				if (! isset( $_list[$key] )) {
-					$_list[$key] = array();
-				}
-				$_list = & $_list[$key];
-			}
-		}
-		return $list;
-	}
-
-
-	protected function _arrayPathDelete( array $list, $path )
-	{
-		if (empty( $path )) {
-			return $list;
-		}
-		if (! is_array( $path )) {
-			$path = explode( static::ARRAY_PATH_DELIMITER, $path );
-		}
-		$_list = & $list;
-		
-		foreach ( $path as $i => $key ) {
-			if (is_numeric( $key ) && intval( $key ) > 0 || $key === '0') {
-				$key = intval( $key );
-			}
-			if ($i === count( $path ) - 1) {
-				unset( $_list[$key] );
-			} else {
-				if (! isset( $_list[$key] )) {
-					return $list;
-				}
-				$_list = & $_list[$key];
-			}
-		}
-		return $list;
-	}
-
-
-	protected function _arrayPathCheck( array $list, $path )
-	{
-		if (empty( $path )) {
-			return $list;
-		}
-		if (! is_array( $path )) {
-			$path = explode( static::ARRAY_PATH_DELIMITER, $path );
-		}
-		
-		foreach ( $path as $i => $key ) {
-			if (is_numeric( $key ) && intval( $key ) > 0 || $key === '0') {
-				$key = intval( $key );
-			}
-			if ($i === count( $path ) - 1) {
-				return (is_array( $list ) && array_key_exists( $key, $list ));
-			}
-			
-			if (! is_array( $list ) || ! array_key_exists( $key, $list )) {
-				return false;
-			}
-			$list = & $list[$key];
-		}
-		return true;
-	}
 }
 
+
+/**
+ * RSession
+ * Static factory wrapper
+ */
 class RSession extends RSessionBase
 {
 	protected static $_instance;
@@ -766,13 +690,13 @@ class RSession extends RSessionBase
 
 	public function getInstance()
 	{
-		return isset( static::$_instance ) ? static::$_instance : static::$_instance = new static::$_classmap['main']();
+		return isset( static::$_instance ) ? static::$_instance : static::$_instance = new self::$_classmap['main']();
 	}
 
 
 	public function setInstance( $instance )
 	{
-		if (! $instance instanceof static::$_classmap['main']) {
+		if (! $instance instanceof self::$_classmap['main']) {
 			throw new InvalidArgumentException( 'Invalid instance type' );
 		}
 		
@@ -796,9 +720,8 @@ class RSession extends RSessionBase
 	public static function config()
 	{
 		$args = func_get_args();
-		$config = static::getInstance()->config;
 		return call_user_func_array( array( 
-			$config, 
+			static::getInstance()->config, 
 			'set' 
 		), $args );
 	}
@@ -809,36 +732,132 @@ class RSession extends RSessionBase
 		static $installed = false;
 		
 		if (! $installed) {
-			/*register_shutdown_function( 'session_write_close' );
-			
-			session_set_save_handler( array( 
-				__CLASS__, 
-				'sess_open' 
-			), array( 
-				__CLASS__, 
-				'sess_close' 
-			), array( 
-				__CLASS__, 
-				'sess_read' 
-			), array( 
-				__CLASS__, 
-				'sess_write' 
-			), array( 
-				__CLASS__, 
-				'sess_destroy' 
-			), array( 
-				__CLASS__, 
-				'sess_gc' 
-			) );
-			
-			if (static::config()->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_OBJECT) {
-				$_SESSION = static::instance();
-			}
-			$installed = true;*/
 			static::getInstance()->install();
 			$installed = true;
 		}
 	}
 }
+
+
+/**
+ * ArrayPath class
+ * Provides array path utility functions
+ */
+class ArrayPath
+{
+	const PATH_DELIMITER = '.';
+
+	public static function basename( $path, $delimiter = self::PATH_DELIMITER )
+	{
+		if (empty( $path )) {
+			throw new InvalidArgumentException( "Invalid path specified '$path'" );
+		}
+		$parts = explode( $delimiter, $path );
+		return $parts[0];
+	}
+
+
+	public static function extract( array $list, $path, $default = null, $delimiter = self::PATH_DELIMITER )
+	{
+		if (! is_array( $list )) {
+			return $default;
+		}
+		
+		$path = trim( $path, $delimiter );
+		$value = & $list;
+		
+		if (! empty( $path )) {
+			$parts = explode( $delimiter, $path );
+			
+			foreach ( $parts as $part ) {
+				if (isset( $value[$part] )) {
+					$value = $value[$part];
+				} else {
+					return $default;
+				}
+			}
+		}
+		
+		return $value;
+	}
+
+
+	public static function insert( array $list, $path, $value = null, $delimiter = self::PATH_DELIMITER )
+	{
+		if (! is_array( $path )) {
+			$path = explode( $delimiter, $path );
+		}
+		$_list = & $list;
+		
+		foreach ( $path as $i => $key ) {
+			if (is_numeric( $key ) && intval( $key ) > 0 || $key === '0') {
+				$key = intval( $key );
+			}
+			if ($i === count( $path ) - 1) {
+				$_list[$key] = $value;
+			} else {
+				if (! isset( $_list[$key] )) {
+					$_list[$key] = array();
+				}
+				$_list = & $_list[$key];
+			}
+		}
+		return $list;
+	}
+
+
+	public static function delete( array $list, $path, $delimiter = self::PATH_DELIMITER )
+	{
+		if (empty( $path )) {
+			return $list;
+		}
+		if (! is_array( $path )) {
+			$path = explode( $delimiter, $path );
+		}
+		$_list = & $list;
+		
+		foreach ( $path as $i => $key ) {
+			if (is_numeric( $key ) && intval( $key ) > 0 || $key === '0') {
+				$key = intval( $key );
+			}
+			if ($i === count( $path ) - 1) {
+				unset( $_list[$key] );
+			} else {
+				if (! isset( $_list[$key] )) {
+					return $list;
+				}
+				$_list = & $_list[$key];
+			}
+		}
+		return $list;
+	}
+
+
+	public static function check( array $list, $path, $delimiter = self::PATH_DELIMITER )
+	{
+		if (empty( $path )) {
+			return $list;
+		}
+		if (! is_array( $path )) {
+			$path = explode( $delimiter, $path );
+		}
+		
+		foreach ( $path as $i => $key ) {
+			if (is_numeric( $key ) && intval( $key ) > 0 || $key === '0') {
+				$key = intval( $key );
+			}
+			if ($i === count( $path ) - 1) {
+				return (is_array( $list ) && array_key_exists( $key, $list ));
+			}
+			
+			if (! is_array( $list ) || ! array_key_exists( $key, $list )) {
+				return false;
+			}
+			$list = & $list[$key];
+		}
+		return true;
+	}
+}
+
 
 ?>
