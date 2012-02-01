@@ -30,7 +30,7 @@ class RSessionConfig extends RSessionBase
 
 	public function __construct( $settings = array() )
 	{
-		$this->settings = ! empty( $settings ) ? array_merge( self::$defaults, $settings ) : self::$defaults;
+		$this->settings = ! empty( $settings ) ? array_merge( static::$defaults, $settings ) : static::$defaults;
 	}
 
 
@@ -88,14 +88,14 @@ class RSessionRedis extends RSessionBase
 	}
 
 
-	public function acquire( $key, $timeout = self::LOCK_DEFAULT_TIMEOUT, $maxAttempts = self::LOCK_DEFAULT_MAX_ATTEMPTS )
+	public function acquire( $key, $timeout = static::LOCK_DEFAULT_TIMEOUT, $maxAttempts = static::LOCK_DEFAULT_MAX_ATTEMPTS )
 	{
 		$expire = (time() + $timeout + 1) . '-' . getmypid();
 		$attempts = 0;
 		
 		do {
 			if ($this->setnx( $key, $expire )) {
-				self::$_locks[$key] = 1;
+				static::$_locks[$key] = 1;
 				return true;
 			}
 			
@@ -103,11 +103,11 @@ class RSessionRedis extends RSessionBase
 			list ( $testExpire, ) = explode( '-', $lockValue );
 			if ($testExpire < time()) {
 				if ($this->getset( $key, $expire ) === $lockValue) {
-					self::$_locks[$key] = 1;
+					static::$_locks[$key] = 1;
 					return true;
 				}
 			}
-			usleep( self::LOCK_RETRY_SLEEP * 1000000 );
+			usleep( static::LOCK_RETRY_SLEEP * 1000000 );
 		} while ( ++ $attempts < $maxAttempts );
 		
 		return false;
@@ -117,14 +117,14 @@ class RSessionRedis extends RSessionBase
 	public function release( $key )
 	{
 		if (($lockValue = $this->get( $key )) === null) {
-			unset( self::$_locks[$key] );
+			unset( static::$_locks[$key] );
 			return true;
 		}
 		
 		list ( $lockTimeout, $lockHolder ) = explode( '-', $lockValue );
 		if ((int) $lockTimeout > time() && (int) $lockHolder === getmypid()) {
 			$this->del( $key );
-			unset( self::$_locks[$key] );
+			unset( static::$_locks[$key] );
 			return true;
 		}
 		return false;
@@ -134,7 +134,7 @@ class RSessionRedis extends RSessionBase
 	protected function _releaseAll()
 	{
 		// release all unreleased locks
-		foreach ( array_keys( self::$_locks ) as $lkey ) {
+		foreach ( array_keys( static::$_locks ) as $lkey ) {
 			$this->release( $lkey );
 		}
 	}
@@ -142,7 +142,7 @@ class RSessionRedis extends RSessionBase
 
 	public function locked( $key, $deep = true )
 	{
-		return ! $deep ? array_key_exists( $key, self::$_locks ) : array_key_exists( $key, self::$_locks ) || $this->exists( $key );
+		return ! $deep ? array_key_exists( $key, static::$_locks ) : array_key_exists( $key, static::$_locks ) || $this->exists( $key );
 	}
 
 
@@ -180,12 +180,12 @@ class RSessionMain extends RSessionBase
 
 	public function __construct( $settings = array() )
 	{
-		if ($settings instanceof self::$_classmap['config']) {
+		if ($settings instanceof static::$_classmap['config']) {
 			$this->config = $settings;
 		} else {
-			$this->config = new self::$_classmap['config']( $settings );
+			$this->config = new static::$_classmap['config']( $settings );
 		}
-		$this->redis = new self::$_classmap['redis']( $this->config );
+		$this->redis = new static::$_classmap['redis']( $this->config );
 		
 		if ($this->config->get( 'session_start' )) {
 			$this->start();
@@ -210,7 +210,7 @@ class RSessionMain extends RSessionBase
 		}
 		
 		if (headers_sent()) {
-			if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_POPULATE) {
+			if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_POPULATE) {
 				$_SESSION = array();
 			}
 			return false;
@@ -223,7 +223,7 @@ class RSessionMain extends RSessionBase
 		}
 		
 		if ($this->started()) {
-			if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_OBJECT) {
+			if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_OBJECT) {
 				$_SESSION = $this;
 			}
 			
@@ -233,7 +233,7 @@ class RSessionMain extends RSessionBase
 				$this->name = session_name();
 				$this->_init();
 				
-				if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_POPULATE) {
+				if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_POPULATE) {
 					$_SESSION = & $this->_data;
 				}
 			}
@@ -258,7 +258,7 @@ class RSessionMain extends RSessionBase
 			throw new Exception( 'Empty session name or session id' );
 		}
 		
-		if (! array_key_exists( $type, self::$keyTemplates )) {
+		if (! array_key_exists( $type, static::$keyTemplates )) {
 			throw new InvalidArgumentException( "Key template '$type' doesn't exist" );
 		}
 		
@@ -266,15 +266,15 @@ class RSessionMain extends RSessionBase
 		
 		switch ($type) {
 		case 'lock':
-			return sprintf( self::$keyTemplates[$type], md5( implode( '-', array( 
+			return sprintf( static::$keyTemplates[$type], md5( implode( '-', array( 
 				$name, 
 				$this->id, 
 				$this->_arrayPathBasename( $args[0] ) 
 			) ) ) );
 		case 'session':
-			return sprintf( self::$keyTemplates[$type], $name, $this->id );
+			return sprintf( static::$keyTemplates[$type], $name, $this->id );
 		default:
-			return vsprintf( self::$keyTemplates[$type], $args );
+			return vsprintf( static::$keyTemplates[$type], $args );
 		}
 	}
 
@@ -481,7 +481,7 @@ class RSessionMain extends RSessionBase
 			$this->_init();
 		} else {
 			$skey = $this->rkey( 'session' );
-			if ($this->redis->hsetnx( $skey, self::HASH_TOUCH_KEY, 1 )) {
+			if ($this->redis->hsetnx( $skey, static::HASH_TOUCH_KEY, 1 )) {
 				$pipe = $this->redis->pipeline();
 				$pipe->expire( $skey, ini_get( 'session.gc_maxlifetime' ) );
 				foreach ( $this->_data as $k => $v ) {
@@ -498,13 +498,13 @@ class RSessionMain extends RSessionBase
 	{
 		$skey = $this->rkey( 'session' );
 		
-		if ($this->redis->hsetnx( $skey, self::HASH_TOUCH_KEY, 1 )) {
+		if ($this->redis->hsetnx( $skey, static::HASH_TOUCH_KEY, 1 )) {
 			// new session
 			$this->redis->expire( $skey, ini_get( 'session.gc_maxlifetime' ) );
 			$this->_data = array();
 		} else {
 			$data = $this->redis->hgetall( $skey );
-			unset( $data[self::HASH_TOUCH_KEY] );
+			unset( $data[static::HASH_TOUCH_KEY] );
 			$this->_data = array_map( array( 
 				& $this, 
 				'_unpack' 
@@ -519,7 +519,7 @@ class RSessionMain extends RSessionBase
 		
 		if ($field === null) {
 			$data = $this->redis->hgetall( $skey );
-			unset( $data[self::HASH_TOUCH_KEY] );
+			unset( $data[static::HASH_TOUCH_KEY] );
 			return array_map( array( 
 				& $this, 
 				'_unpack' 
@@ -587,7 +587,7 @@ class RSessionMain extends RSessionBase
 			'sess_gc' 
 		) );
 		
-		if ($this->config->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_OBJECT) {
+		if ($this->config->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_OBJECT) {
 			$_SESSION = $this;
 		}
 	}
@@ -640,7 +640,7 @@ class RSessionMain extends RSessionBase
 		if (empty( $path )) {
 			throw new InvalidArgumentException( "Invalid path specified '$path'" );
 		}
-		$parts = explode( self::ARRAY_PATH_DELIMITER, $path );
+		$parts = explode( static::ARRAY_PATH_DELIMITER, $path );
 		return $parts[0];
 	}
 
@@ -651,11 +651,11 @@ class RSessionMain extends RSessionBase
 			return $default;
 		}
 		
-		$path = trim( $path, self::ARRAY_PATH_DELIMITER );
+		$path = trim( $path, static::ARRAY_PATH_DELIMITER );
 		$value = & $list;
 		
 		if (! empty( $path )) {
-			$parts = explode( self::ARRAY_PATH_DELIMITER, $path );
+			$parts = explode( static::ARRAY_PATH_DELIMITER, $path );
 			
 			foreach ( $parts as $part ) {
 				if (isset( $value[$part] )) {
@@ -700,7 +700,7 @@ class RSessionMain extends RSessionBase
 			return $list;
 		}
 		if (! is_array( $path )) {
-			$path = explode( self::ARRAY_PATH_DELIMITER, $path );
+			$path = explode( static::ARRAY_PATH_DELIMITER, $path );
 		}
 		$_list = & $list;
 		
@@ -727,7 +727,7 @@ class RSessionMain extends RSessionBase
 			return $list;
 		}
 		if (! is_array( $path )) {
-			$path = explode( self::ARRAY_PATH_DELIMITER, $path );
+			$path = explode( static::ARRAY_PATH_DELIMITER, $path );
 		}
 		
 		foreach ( $path as $i => $key ) {
@@ -766,13 +766,13 @@ class RSession extends RSessionBase
 
 	public function getInstance()
 	{
-		return isset( static::$_instance ) ? static::$_instance : static::$_instance = new self::$_classmap['main']();
+		return isset( static::$_instance ) ? static::$_instance : static::$_instance = new static::$_classmap['main']();
 	}
 
 
 	public function setInstance( $instance )
 	{
-		if (! $instance instanceof self::$_classmap['main']) {
+		if (! $instance instanceof static::$_classmap['main']) {
 			throw new InvalidArgumentException( 'Invalid instance type' );
 		}
 		
@@ -831,8 +831,8 @@ class RSession extends RSessionBase
 				'sess_gc' 
 			) );
 			
-			if (self::config()->get( 'session_array_compat' ) === self::SESSION_ARRAY_COMPAT_OBJECT) {
-				$_SESSION = self::instance();
+			if (static::config()->get( 'session_array_compat' ) === static::SESSION_ARRAY_COMPAT_OBJECT) {
+				$_SESSION = static::instance();
 			}
 			$installed = true;*/
 			static::getInstance()->install();
