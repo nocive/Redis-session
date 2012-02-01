@@ -88,8 +88,8 @@ class RSessionRedis extends RSessionBase
 
 	public function __construct( $config )
 	{
-		if (! is_object( $config )) {
-			throw new InvalidArgumentException( '$config is not a valid config object' );
+		if (! $config instanceof self::$_classmap['config']) {
+			throw new InvalidArgumentException( '$config is not a valid config instance' );
 		}
 		$this->config = $config;
 		
