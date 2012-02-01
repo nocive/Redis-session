@@ -254,10 +254,6 @@ class RSessionMain extends RSessionBase
 		$args = func_get_args();
 		$type = array_shift( $args );
 		
-		/*var_dump( $this->name );
-		var_dump( $this->id );
-		debug_print_backtrace();
-		echo "<br><br>";*/
 		if (empty( $this->name ) || empty( $this->id )) {
 			throw new Exception( 'Empty session name or session id' );
 		}
@@ -770,13 +766,13 @@ class RSession extends RSessionBase
 
 	public function getInstance()
 	{
-		return isset( static::$_instance ) ? static::$_instance : static::$_instance = new static::$_classmap['main']();
+		return isset( static::$_instance ) ? static::$_instance : static::$_instance = new self::$_classmap['main']();
 	}
 
 
 	public function setInstance( $instance )
 	{
-		if (! $instance instanceof static::$_classmap['main']) {
+		if (! $instance instanceof self::$_classmap['main']) {
 			throw new InvalidArgumentException( 'Invalid instance type' );
 		}
 		
